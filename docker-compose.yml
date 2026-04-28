@@ -1,0 +1,48 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - REMBG_MODEL=birefnet-general
+      - SAM_MODEL_TYPE=vit_b
+      - SAM_CHECKPOINT=/models/sam_vit_b.pth
+    volumes:
+      - tmp_data:/tmp/bg_remover
+      - ${HOME}/models:/models:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8080
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - REMBG_MODEL=birefnet-general
+      - SAM_MODEL_TYPE=vit_b
+      - SAM_CHECKPOINT=/models/sam_vit_b.pth
+    volumes:
+      - tmp_data:/tmp/bg_remover
+      - ${HOME}/models:/models:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A worker.celery_app worker --loglevel=info --concurrency=1
+
+volumes:
+  tmp_data:
